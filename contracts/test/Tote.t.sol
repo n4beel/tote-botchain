@@ -525,4 +525,70 @@ contract ToteTest is Test {
 
     assertEq(tote.pending(alice) + tote.pending(bob), uint256(a1) + a2);
   }
+
+  function test_AdditionalMutantKillers() public {
+    // 1. Kill Tote.sol:118 MAX_QUESTION_LEN boundary (exact MAX length succeeds)
+    bytes memory maxQ = new bytes(120);
+    for (uint256 i = 0; i < 120; i++) maxQ[i] = "a";
+    vm.prank(creator);
+    uint256 mId = tote.open(string(maxQ), _defaultOptions(), judge, 0, CLOSE_SECS, DECIDE_SECS);
+    assertEq(mId, 1);
+
+    // 2. Kill Tote.sol:325 (uint256 pool = total - fee in quoteClaim)
+    vm.prank(alice);
+    tote.bet{value: 2 ether}(mId, 0);
+    vm.prank(bob);
+    tote.bet{value: 2 ether}(mId, 1);
+
+    // With fee 1000 bps (10%), total = 4 ether, fee = 0.4 ether, pool = 3.8 ether
+    // Let's create market with fee to test quoteClaim pool computation
+    vm.prank(creator);
+    uint256 feeId = tote.open("Fee Q", _defaultOptions(), judge, 500, CLOSE_SECS, DECIDE_SECS);
+    vm.prank(alice);
+    tote.bet{value: 1 ether}(feeId, 0);
+    vm.prank(bob);
+    tote.bet{value: 3 ether}(feeId, 1);
+    vm.warp(block.timestamp + CLOSE_SECS + 1);
+    vm.prank(judge);
+    tote.decide(feeId, 0);
+    // Alice wins: total 4 ether, fee 0.4 ether, pool 3.8 ether. Alice stake is 1 ether, winTotal is 1 ether.
+    // quoteClaim should be 3.8 ether. If pool = total + fee, it would be 4.4 ether!
+    assertEq(tote.quoteClaim(feeId, alice), 3.8 ether);
+
+    // 3. Kill Tote.sol:175 (block.timestamp == decideBy is allowed to decide)
+    vm.prank(creator);
+    uint256 dId = tote.open("Decide Exact", _defaultOptions(), judge, 0, CLOSE_SECS, DECIDE_SECS);
+    Tote.Market memory dm = tote.marketOf(dId);
+    vm.warp(dm.decideBy); // exact boundary
+    vm.prank(judge);
+    tote.decide(dId, 0);
+    assertEq(uint8(tote.marketOf(dId).state), uint8(Tote.State.Void));
+
+    // 4. Kill Tote.sol:203 (expire boundary: at exact decideBy, expire reverts StillDeciding)
+    vm.prank(creator);
+    uint256 expId = tote.open("Exp Exact", _defaultOptions(), judge, 0, CLOSE_SECS, DECIDE_SECS);
+    Tote.Market memory expM = tote.marketOf(expId);
+    vm.warp(expM.decideBy);
+    vm.expectRevert(abi.encodeWithSelector(Tote.StillDeciding.selector, expM.decideBy));
+    tote.expire(expId);
+
+    // 5. Kill Tote.sol:351 & 358 (latest pagination logic)
+    // We now have at least 4 markets
+    (uint256[] memory ids, Tote.Market[] memory mkts, uint256 total) = tote.latest(1, 2);
+    assertEq(ids.length, 2);
+    assertEq(ids[0], total - 1);
+    assertEq(ids[1], total - 2);
+
+    // offset + count >= total
+    (uint256[] memory ids2,,) = tote.latest(total - 1, 5);
+    assertEq(ids2.length, 1);
+    assertEq(ids2[0], 1);
+
+    // 6. Kill Tote.sol:286 marketOf(marketCount) and marketOf(marketCount + 1)
+    tote.marketOf(tote.marketCount());
+    uint256 nextId = tote.marketCount() + 1;
+    vm.expectRevert(Tote.MarketNotFound.selector);
+    tote.marketOf(nextId);
+  }
+
 }
