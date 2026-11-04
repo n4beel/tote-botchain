@@ -1,59 +1,55 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import * as limits from "../limits";
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+import { TOTE_CONSTANTS } from "../tote";
 
-/**
- * The contract's limits and the UI's copy of them, pinned together.
- *
- * Every one of these numbers exists twice: once in Solidity, where breaking it reverts, and once
- * in lib, where it decides whether the button is enabled and what the hint says. Today they
- * agree. Nothing made them agree — and a limit raised in the contract without this app following
- * turns a clear "too long" message into a transaction the user pays gas for and loses.
- *
- * Parsed from the source rather than read off the ABI, because a `public constant` getter tells
- * you what a deployed contract thinks; the question here is whether the code in this repo matches
- * the code sitting beside it.
- */
+describe("contract limits agreement", () => {
+  it("matches constants defined in Tote.sol", () => {
+    const solPath = resolve(__dirname, "../../contracts/src/Tote.sol");
+    const solContent = readFileSync(solPath, "utf8");
 
-const SRC = join(__dirname, "..", "..", "contracts", "src");
+    // MAX_QUESTION_BYTES = 120
+    expect(solContent).toContain("MAX_QUESTION_BYTES = 120");
+    expect(TOTE_CONSTANTS.MAX_QUESTION_BYTES).toBe(120);
 
-function solidityConstants(): Map<string, bigint> {
-  const found = new Map<string, bigint>();
-  for (const file of readdirSync(SRC).filter((f) => f.endsWith(".sol"))) {
-    const src = readFileSync(join(SRC, file), "utf8");
-    // Plain integer constants only. Ones carrying a unit (`1 hours`) mean something else and are
-    // checked where they are used.
-    for (const m of src.matchAll(/constant\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*;/g)) {
-      found.set(m[1], BigInt(m[2]));
-    }
-  }
-  return found;
-}
+    // MAX_OPTION_BYTES = 32
+    expect(solContent).toContain("MAX_OPTION_BYTES = 32");
+    expect(TOTE_CONSTANTS.MAX_OPTION_BYTES).toBe(32);
 
-describe("the contract's limits and this app's copy of them", () => {
-  const onChain = solidityConstants();
+    // MIN_OPTIONS = 2
+    expect(solContent).toContain("MIN_OPTIONS = 2");
+    expect(TOTE_CONSTANTS.MIN_OPTIONS).toBe(2);
 
-  it("found constants in the contract to check against", () => {
-    expect(onChain.size).toBeGreaterThan(0);
-  });
+    // MAX_OPTIONS = 6
+    expect(solContent).toContain("MAX_OPTIONS = 6");
+    expect(TOTE_CONSTANTS.MAX_OPTIONS).toBe(6);
 
-  it("agrees on every limit both sides declare", () => {
-    const declared = limits as unknown as Record<string, number>;
-    const shared = [...onChain.keys()].filter((name) => typeof declared[name] === "number");
+    // MIN_BET = 0.001 ether
+    expect(solContent).toContain("MIN_BET = 0.001 ether");
+    expect(TOTE_CONSTANTS.MIN_BET).toBe(1000000000000000n);
 
-    expect(
-      shared.length,
-      "no shared constant names — has one side been renamed?",
-    ).toBeGreaterThan(0);
+    // MAX_JUDGE_BPS = 500
+    expect(solContent).toContain("MAX_JUDGE_BPS = 500");
+    expect(TOTE_CONSTANTS.MAX_JUDGE_BPS).toBe(500);
 
-    const disagreements = shared
-      .filter((name) => BigInt(declared[name]) !== onChain.get(name))
-      .map(
-        (name) =>
-          name + ": contract says " + onChain.get(name) + ", this app says " + declared[name],
-      );
+    // MIN_CLOSE = 1 hours
+    expect(solContent).toContain("MIN_CLOSE = 1 hours");
+    expect(TOTE_CONSTANTS.MIN_CLOSE).toBe(3600n);
 
-    expect(disagreements.join("\n")).toBe("");
+    // MAX_CLOSE = 90 days
+    expect(solContent).toContain("MAX_CLOSE = 90 days");
+    expect(TOTE_CONSTANTS.MAX_CLOSE).toBe(7776000n);
+
+    // MIN_DECIDE = 1 days
+    expect(solContent).toContain("MIN_DECIDE = 1 days");
+    expect(TOTE_CONSTANTS.MIN_DECIDE).toBe(86400n);
+
+    // MAX_DECIDE = 30 days
+    expect(solContent).toContain("MAX_DECIDE = 30 days");
+    expect(TOTE_CONSTANTS.MAX_DECIDE).toBe(2592000n);
+
+    // MAX_PAGE = 50
+    expect(solContent).toContain("MAX_PAGE = 50");
+    expect(TOTE_CONSTANTS.MAX_PAGE).toBe(50);
   });
 });
